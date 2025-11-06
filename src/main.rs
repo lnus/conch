@@ -16,14 +16,25 @@ struct GitInfo {
 }
 
 impl GitInfo {
+    // TODO: split out and don't insta fail into propogate None always
+    // for now this works fine though, we could just unwrap some stuff into defaults
     fn gather() -> Option<Self> {
-        let branch = get_branch_name_sh().ok()?;
-        if branch.is_empty() {
-            return None;
-        }
+        let repo = gix::discover(".").ok()?;
+        let head = repo.head().ok()?;
+        let branch = head
+            .referent_name()
+            .and_then(|n| n.shorten().to_string().into())?;
 
-        let root = get_repo_root_sh().ok()?;
-        let dirty = get_repo_status_sh().unwrap_or(false);
+        // FIX this line is kinda ugly
+        // workdir is rel. path, but surely we can get canonical path easier?
+        let root = repo.workdir()?.to_path_buf().canonicalize().ok()?;
+
+        // could probably do more with status rather than just dirty y||n
+        // we're already pulling the entire dep
+        let dirty = repo.is_dirty().ok()?;
+
+        // TODO: rewrite to gix, too lazy rn.
+        // or remove tbh i don't care about this too much
         let (behind, ahead) = get_ahead_behind_sh().unwrap_or((0, 0));
 
         Some(Self {
@@ -35,6 +46,7 @@ impl GitInfo {
         })
     }
 
+    // reconsider
     fn format(&self) -> String {
         let mut result = self.branch.clone();
 
@@ -59,27 +71,25 @@ impl GitInfo {
     }
 }
 
+// magnum opus function
 fn abbreviate_path(path: &Path) -> String {
-    let components: Vec<_> = path.components().collect();
+    match path.components().collect::<Vec<_>>().as_slice() {
+        [] | [_] => path.display().to_string(),
+        [init @ .., last] => {
+            let abbreviated = init
+                .iter()
+                .filter_map(|c| c.as_os_str().to_str()?.chars().next())
+                .fold(String::new(), |mut acc, ch| {
+                    if !acc.is_empty() {
+                        acc.push('/');
+                    }
+                    acc.push(ch);
+                    acc
+                });
 
-    if components.len() <= 1 {
-        return path.display().to_string();
+            format!("{}/{}", abbreviated, last.as_os_str().to_string_lossy())
+        }
     }
-
-    let abbreviated: Vec<String> = components
-        .iter()
-        .take(components.len() - 1)
-        .filter_map(|c| {
-            c.as_os_str()
-                .to_str()
-                .and_then(|s| s.chars().next())
-                .map(|ch| ch.to_string())
-        })
-        .collect();
-
-    let last = components.last().unwrap().as_os_str().to_string_lossy();
-
-    format!("{}/{}", abbreviated.join("/"), last)
 }
 
 fn build_path_display(cwd: &Path, repo: Option<&Path>) -> Result<String> {
@@ -106,33 +116,6 @@ fn build_path_display(cwd: &Path, repo: Option<&Path>) -> Result<String> {
     }
 
     Ok(cwd.display().to_string())
-}
-
-// TODO PERF: consider doing this from file traversal?
-// TODO PERF: cwd->repo cache?
-fn get_branch_name_sh() -> Result<String> {
-    // NOTE: since git 2.22 `git branch --show-current` works
-    let output = Command::new("git")
-        .args(["symbolic-ref", "--short", "HEAD"])
-        .output()?;
-    let s = String::from_utf8(output.stdout)?.trim().to_string();
-    Ok(s)
-}
-
-fn get_repo_root_sh() -> Result<PathBuf> {
-    let output = Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .output()?;
-    let path = String::from_utf8(output.stdout)?.trim().to_string();
-    Ok(PathBuf::from(path))
-}
-
-fn get_repo_status_sh() -> Result<bool> {
-    let output = Command::new("git")
-        .args(["status", "--porcelain"])
-        .output()?;
-
-    Ok(!output.stdout.is_empty())
 }
 
 fn get_ahead_behind_sh() -> Result<(usize, usize)> {
