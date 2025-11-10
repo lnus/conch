@@ -1,73 +1,142 @@
-use nu_ansi_term::Color::*;
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
-
 use anyhow::Result;
+use nu_ansi_term::Color;
+use std::path::{Path, PathBuf};
 
-#[derive(Debug)]
-struct GitInfo {
-    branch: String,
-    root: PathBuf,
-    dirty: bool,
-    ahead: usize,
-    behind: usize,
+trait PromptSegment {
+    fn display(&self) -> Option<String>;
 }
 
+impl<T: PromptSegment> PromptSegment for Option<T> {
+    fn display(&self) -> Option<String> {
+        self.as_ref().and_then(|s| s.display())
+    }
+}
+
+#[derive(Debug, Default)]
+struct GitInfo {
+    branch: Option<String>,
+    root: Option<PathBuf>,
+    dirty: bool,
+}
+
+// TODO: add back better ahead/behind
 impl GitInfo {
-    // TODO: split out and don't insta fail into propogate None always
-    // for now this works fine though, we could just unwrap some stuff into defaults
-    fn gather() -> Option<Self> {
-        let repo = gix::discover(".").ok()?;
-        let head = repo.head().ok()?;
-        let branch = head
-            .referent_name()
-            .and_then(|n| n.shorten().to_string().into())?;
+    fn gather(cwd: &Path) -> Self {
+        let Ok(repo) = gix::discover(cwd) else {
+            return Self::default();
+        };
 
-        // FIX this line is kinda ugly
-        // workdir is rel. path, but surely we can get canonical path easier?
-        let root = repo.workdir()?.to_path_buf().canonicalize().ok()?;
+        let branch = repo.head().ok().and_then(|head| {
+            let name = head.referent_name()?;
+            Some(name.shorten().to_string())
+        });
 
-        // could probably do more with status rather than just dirty y||n
-        // we're already pulling the entire dep
-        let dirty = repo.is_dirty().ok()?;
+        let root = repo.workdir().and_then(|wd| wd.canonicalize().ok());
+        let dirty = repo.is_dirty().unwrap_or(false);
 
-        // TODO: rewrite to gix, too lazy rn.
-        // or remove tbh i don't care about this too much
-        let (behind, ahead) = get_ahead_behind_sh().unwrap_or((0, 0));
-
-        Some(Self {
+        Self {
             branch,
             root,
             dirty,
-            ahead,
-            behind,
-        })
+        }
     }
+}
 
-    // reconsider
-    fn format(&self) -> String {
-        let mut result = self.branch.clone();
+impl PromptSegment for GitInfo {
+    fn display(&self) -> Option<String> {
+        let mut result = self.branch.as_ref()?.clone();
 
         if self.dirty {
             result.push_str("*");
         }
 
-        let mut indicators = vec![];
-        if self.ahead > 0 {
-            indicators.push(format!("{} ahead", self.ahead));
+        Some(Color::Purple.paint(result).to_string())
+    }
+}
+
+struct PathInfo {
+    cwd: PathBuf,
+    git_root: Option<PathBuf>,
+}
+
+impl PathInfo {
+    fn new(cwd: PathBuf, git_root: Option<PathBuf>) -> Self {
+        Self { cwd, git_root }
+    }
+
+    fn build_display(&self) -> String {
+        self.git_relative_path()
+            .or_else(|| self.home_relative_path())
+            .unwrap_or_else(|| self.cwd.display().to_string())
+    }
+
+    fn git_relative_path(&self) -> Option<String> {
+        let repo = self.git_root.as_ref()?;
+        let relative = self.cwd.strip_prefix(repo).ok()?;
+
+        let name = repo.file_name()?.to_str().unwrap_or("?how?");
+
+        if relative.as_os_str().is_empty() {
+            Some(name.to_string())
+        } else {
+            Some(format!("{}/{}", name, relative.display()))
         }
-        if self.behind > 0 {
-            indicators.push(format!("{} behind", self.behind));
+    }
+
+    fn home_relative_path(&self) -> Option<String> {
+        let home = dirs::home_dir()?;
+
+        if self.cwd == home {
+            return Some("~".to_string());
         }
 
-        if !indicators.is_empty() {
-            result.push(' ');
-            result.push_str(&indicators.join(" "));
-        }
+        let relative = self.cwd.strip_prefix(&home).ok()?;
+        Some(format!("~/{}", abbreviate_path(relative)))
+    }
+}
 
-        result
+impl PromptSegment for PathInfo {
+    fn display(&self) -> Option<String> {
+        Some(Color::Cyan.bold().paint(self.build_display()).to_string())
+    }
+}
+
+struct EnvIndicator {
+    key: &'static str,
+    display: &'static str,
+}
+
+impl EnvIndicator {
+    fn new(key: &'static str, display: &'static str) -> Self {
+        Self { key, display }
+    }
+}
+
+impl PromptSegment for EnvIndicator {
+    fn display(&self) -> Option<String> {
+        std::env::var(self.key).ok()?;
+        Some(Color::Yellow.paint(self.display).to_string())
+    }
+}
+
+struct Prompt {
+    parts: Vec<String>,
+}
+
+impl Prompt {
+    fn new() -> Self {
+        Self { parts: Vec::new() }
+    }
+
+    fn add_if(mut self, segment: impl PromptSegment) -> Self {
+        if let Some(display) = segment.display() {
+            self.parts.push(display);
+        }
+        self
+    }
+
+    fn build(&self) -> String {
+        self.parts.join(" ")
     }
 }
 
@@ -92,57 +161,16 @@ fn abbreviate_path(path: &Path) -> String {
     }
 }
 
-fn build_path_display(cwd: &Path, repo: Option<&Path>) -> Result<String> {
-    if let Some(repo) = repo {
-        if let Ok(relative) = cwd.strip_prefix(repo) {
-            let name = repo.file_name().and_then(|n| n.to_str()).unwrap_or("?how?");
-
-            if relative.as_os_str().is_empty() {
-                return Ok(name.to_string());
-            }
-
-            return Ok(format!("{}/{}", name, relative.display()));
-        }
-    }
-
-    if let Some(home) = dirs::home_dir() {
-        if cwd == home {
-            return Ok("~".to_string());
-        }
-
-        if let Ok(relative) = cwd.strip_prefix(&home) {
-            return Ok(format!("~/{}", abbreviate_path(&relative)));
-        }
-    }
-
-    Ok(cwd.display().to_string())
-}
-
-fn get_ahead_behind_sh() -> Result<(usize, usize)> {
-    let output = Command::new("git")
-        .args(["rev-list", "--left-right", "--count", "@{upstream}...HEAD"])
-        .output()?;
-
-    let s = String::from_utf8(output.stdout)?;
-    let mut parts = s.trim().split_whitespace();
-
-    let behind = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-    let ahead = parts.next().and_then(|n| n.parse().ok()).unwrap_or(0);
-
-    Ok((behind, ahead))
-}
-
 fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
-    let git_info = GitInfo::gather();
+    let git_info = GitInfo::gather(&cwd);
 
-    let path = build_path_display(&cwd, git_info.as_ref().map(|g| g.root.as_path()))?;
+    let prompt = Prompt::new()
+        .add_if(PathInfo::new(cwd, git_info.root.clone()))
+        .add_if(git_info)
+        .add_if(EnvIndicator::new("IN_NIX_SHELL", "nix"));
 
-    print!("{}", Cyan.bold().paint(path));
-
-    if let Some(info) = git_info {
-        print!(" {}", Purple.paint(info.format()));
-    }
+    print!("{}", prompt.build());
 
     Ok(())
 }
