@@ -119,6 +119,22 @@ impl PromptSegment for EnvIndicator {
     }
 }
 
+struct PromptPrefix {
+    prefix: &'static str,
+}
+
+impl PromptPrefix {
+    fn new(prefix: &'static str) -> Self {
+        Self { prefix }
+    }
+}
+
+impl PromptSegment for PromptPrefix {
+    fn display(&self) -> Option<String> {
+        Some(Color::Yellow.paint(self.prefix).to_string())
+    }
+}
+
 struct Prompt {
     parts: Vec<String>,
 }
@@ -135,8 +151,15 @@ impl Prompt {
         self
     }
 
-    fn build(&self) -> String {
-        self.parts.join(" ")
+    fn build(&self, separator: Option<char>, color: Option<Color>) -> String {
+        match (separator, color) {
+            (Some(ch), Some(col)) => {
+                let sep = col.paint(ch.to_string()).to_string();
+                self.parts.join(&sep)
+            }
+            (Some(ch), None) => self.parts.join(&ch.to_string()),
+            _ => self.parts.join(" "),
+        }
     }
 }
 
@@ -166,11 +189,12 @@ fn main() -> Result<()> {
     let git_info = GitInfo::gather(&cwd);
 
     let prompt = Prompt::new()
+        .add_if(PromptPrefix::new("╔"))
         .add_if(PathInfo::new(cwd, git_info.root.clone()))
         .add_if(git_info)
         .add_if(EnvIndicator::new("IN_NIX_SHELL", "nix"));
 
-    print!("{}", prompt.build());
+    print!("{}", prompt.build(Some('═'), Some(Color::Yellow)));
 
     Ok(())
 }
