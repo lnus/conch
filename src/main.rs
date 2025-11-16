@@ -42,8 +42,8 @@ impl Prompt {
 }
 
 struct GitContext {
-    branch: Option<String>,
-    root: Option<PathBuf>,
+    branch: String,
+    root: PathBuf,
     dirty: bool,
 }
 
@@ -54,9 +54,9 @@ impl GitContext {
         let branch = repo.head().ok().and_then(|head| {
             let name = head.referent_name()?;
             Some(name.shorten().to_string())
-        });
+        })?;
 
-        let root = repo.workdir().and_then(|wd| wd.canonicalize().ok());
+        let root = repo.workdir().and_then(|wd| wd.canonicalize().ok())?;
         let dirty = repo.is_dirty().unwrap_or(false);
 
         Some(Self {
@@ -88,40 +88,32 @@ fn abbreviate_path(path: &Path) -> String {
     }
 }
 
-fn git_relative_path(cwd: &Path, git: Option<&GitContext>) -> Option<String> {
-    let git = git?;
-    let root = git.root.as_ref()?;
-
-    let relative = cwd.strip_prefix(root).ok()?;
-    let name = root.file_name()?.to_str().unwrap_or("?how?");
-
-    if relative.as_os_str().is_empty() {
-        Some(name.to_string())
-    } else {
-        Some(format!("{}/{}", name, relative.display()))
-    }
-}
-
-fn home_relative_path(cwd: &Path) -> Option<String> {
-    let home = dirs::home_dir()?;
-
-    if cwd == home {
-        return Some("~".to_string());
-    }
-
-    let relative = cwd.strip_prefix(&home).ok()?;
-    Some(format!("~/{}", abbreviate_path(relative)))
-}
-
-// maybe inline these abstractions (home_rel*, git_rel*)
 fn format_path(cwd: &Path, git: Option<&GitContext>) -> String {
-    git_relative_path(cwd, git)
-        .or_else(|| home_relative_path(cwd))
-        .unwrap_or_else(|| cwd.display().to_string())
+    git.and_then(|git| {
+        let relative = cwd.strip_prefix(&git.root).ok()?;
+        let name = git.root.file_name()?.to_str().unwrap_or("?how?");
+
+        if relative.as_os_str().is_empty() {
+            Some(name.to_string())
+        } else {
+            Some(format!("{}/{}", name, relative.display()))
+        }
+    })
+    .or_else(|| {
+        let home = dirs::home_dir()?;
+
+        if cwd == home {
+            return Some("~".to_string());
+        }
+
+        let relative = cwd.strip_prefix(&home).ok()?;
+        Some(format!("~/{}", abbreviate_path(relative)))
+    })
+    .unwrap_or_else(|| cwd.display().to_string())
 }
 
 fn format_git(git: &GitContext) -> Option<String> {
-    let mut result = git.branch.as_ref()?.clone();
+    let mut result = git.branch.clone();
     if git.dirty {
         result.push('*');
     }
