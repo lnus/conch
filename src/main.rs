@@ -1,142 +1,119 @@
 use anyhow::Result;
-use nu_ansi_term::Color;
-use std::path::{Path, PathBuf};
+use nu_ansi_term::{Color, Style};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
-trait PromptSegment {
-    fn display(&self) -> Option<String>;
+struct Segment {
+    text: String,
+    style: Style,
 }
 
-impl<T: PromptSegment> PromptSegment for Option<T> {
-    fn display(&self) -> Option<String> {
-        self.as_ref().and_then(|s| s.display())
-    }
+struct PromptConfig {
+    separator: String,
+    prefix: Option<String>,
+    suffix: Option<String>,
+    style: Style,
 }
 
-#[derive(Debug, Default)]
-struct GitInfo {
-    branch: Option<String>,
-    root: Option<PathBuf>,
-    dirty: bool,
-}
+impl PromptConfig {
+    fn from_env(style: Style) -> Self {
+        let plain = std::env::var("CONCH_PLAIN")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
 
-// TODO: add back better ahead/behind
-impl GitInfo {
-    fn gather(cwd: &Path) -> Self {
-        let Ok(repo) = gix::discover(cwd) else {
-            return Self::default();
+        let multiline = std::env::var("CONCH_MULTILINE")
+            .map(|v| v != "0" && v != "false")
+            .unwrap_or(true);
+
+        let (separator, prefix, suffix) = match (plain, multiline) {
+            (true, _) => (" ".to_string(), None, None),
+            (false, true) => (
+                " ∵ ".to_string(),
+                Some("┏━ ".to_string()),
+                Some("\n┃".to_string()),
+            ),
+            (false, false) => (" ∵ ".to_string(), None, None),
         };
 
-        let branch = repo.head().ok().and_then(|head| {
-            let name = head.referent_name()?;
-            Some(name.shorten().to_string())
-        });
-
-        let root = repo.workdir().and_then(|wd| wd.canonicalize().ok());
-        let dirty = repo.is_dirty().unwrap_or(false);
-
         Self {
-            branch,
-            root,
-            dirty,
+            separator,
+            prefix,
+            suffix,
+            style,
         }
-    }
-}
-
-impl PromptSegment for GitInfo {
-    fn display(&self) -> Option<String> {
-        let mut result = self.branch.as_ref()?.clone();
-
-        if self.dirty {
-            result.push_str("*");
-        }
-
-        Some(Color::Purple.paint(result).to_string())
-    }
-}
-
-struct PathInfo {
-    cwd: PathBuf,
-    git_root: Option<PathBuf>,
-}
-
-impl PathInfo {
-    fn new(cwd: PathBuf, git_root: Option<PathBuf>) -> Self {
-        Self { cwd, git_root }
-    }
-
-    fn build_display(&self) -> String {
-        self.git_relative_path()
-            .or_else(|| self.home_relative_path())
-            .unwrap_or_else(|| self.cwd.display().to_string())
-    }
-
-    fn git_relative_path(&self) -> Option<String> {
-        let repo = self.git_root.as_ref()?;
-        let relative = self.cwd.strip_prefix(repo).ok()?;
-
-        let name = repo.file_name()?.to_str().unwrap_or("?how?");
-
-        if relative.as_os_str().is_empty() {
-            Some(name.to_string())
-        } else {
-            Some(format!("{}/{}", name, relative.display()))
-        }
-    }
-
-    fn home_relative_path(&self) -> Option<String> {
-        let home = dirs::home_dir()?;
-
-        if self.cwd == home {
-            return Some("~".to_string());
-        }
-
-        let relative = self.cwd.strip_prefix(&home).ok()?;
-        Some(format!("~/{}", abbreviate_path(relative)))
-    }
-}
-
-impl PromptSegment for PathInfo {
-    fn display(&self) -> Option<String> {
-        Some(Color::Cyan.bold().paint(self.build_display()).to_string())
-    }
-}
-
-struct EnvIndicator {
-    key: &'static str,
-    display: &'static str,
-}
-
-impl EnvIndicator {
-    fn new(key: &'static str, display: &'static str) -> Self {
-        Self { key, display }
-    }
-}
-
-impl PromptSegment for EnvIndicator {
-    fn display(&self) -> Option<String> {
-        std::env::var(self.key).ok()?;
-        Some(Color::Yellow.paint(self.display).to_string())
     }
 }
 
 struct Prompt {
-    parts: Vec<String>,
+    segments: Vec<Segment>,
+    config: PromptConfig,
 }
 
 impl Prompt {
-    fn new() -> Self {
-        Self { parts: Vec::new() }
-    }
-
-    fn add_if(mut self, segment: impl PromptSegment) -> Self {
-        if let Some(display) = segment.display() {
-            self.parts.push(display);
+    fn new(config: PromptConfig) -> Self {
+        Self {
+            segments: Vec::new(),
+            config,
         }
-        self
     }
 
-    fn build(&self) -> String {
-        self.parts.join(" ")
+    fn push(&mut self, text: impl Into<String>, style: Style) {
+        self.segments.push(Segment {
+            text: text.into(),
+            style,
+        })
+    }
+
+    fn push_if(&mut self, text: Option<String>, style: Style) {
+        if let Some(text) = text {
+            self.push(text, style);
+        }
+    }
+
+    fn print(&self) {
+        // TODO: this painting logic is a bit ugly
+        if let Some(prefix) = &self.config.prefix {
+            print!("{}", self.config.style.paint(prefix));
+        }
+
+        for (i, seg) in self.segments.iter().enumerate() {
+            if i > 0 {
+                print!("{}", self.config.style.paint(&self.config.separator));
+            }
+            print!("{}", seg.style.paint(&seg.text));
+        }
+
+        if let Some(suffix) = &self.config.suffix {
+            print!("{}", self.config.style.paint(suffix));
+        }
+    }
+}
+
+struct GitContext {
+    branch: String,
+    root: PathBuf,
+    dirty: bool,
+}
+
+impl GitContext {
+    fn discover(cwd: &Path) -> Option<Self> {
+        let repo = gix::discover(cwd).ok()?;
+
+        let branch = repo.head().ok().and_then(|head| {
+            let name = head.referent_name()?;
+            Some(name.shorten().to_string())
+        })?;
+
+        let root = repo.workdir().and_then(|wd| wd.canonicalize().ok())?;
+        let dirty = repo.is_dirty().unwrap_or(false);
+
+        Some(Self {
+            branch,
+            root,
+            dirty,
+        })
     }
 }
 
@@ -161,16 +138,98 @@ fn abbreviate_path(path: &Path) -> String {
     }
 }
 
+fn format_path(cwd: &Path, git: Option<&GitContext>) -> String {
+    git.and_then(|git| {
+        let relative = cwd.strip_prefix(&git.root).ok()?;
+        let name = git.root.file_name()?.to_str().unwrap_or("?how?");
+
+        if relative.as_os_str().is_empty() {
+            Some(name.to_string())
+        } else {
+            Some(format!("{}/{}", name, relative.display()))
+        }
+    })
+    .or_else(|| {
+        let home = dirs::home_dir()?;
+
+        if cwd == home {
+            return Some("~".to_string());
+        }
+
+        let relative = cwd.strip_prefix(&home).ok()?;
+        Some(format!("~/{}", abbreviate_path(relative)))
+    })
+    .unwrap_or_else(|| cwd.display().to_string())
+}
+
+fn format_git(git: &GitContext) -> String {
+    let mut result = git.branch.clone();
+    if git.dirty {
+        result.push('*');
+    }
+    result
+}
+
+fn format_duration(duration: Duration) -> Option<String> {
+    match duration.as_millis() {
+        0..100 => None,
+        100..1000 => Some(format!("{}ms", duration.as_millis())),
+        1000..60_000 => Some(format!("{:.1}s", duration.as_secs_f64())),
+        60_000..3_600_000 => {
+            let secs = duration.as_secs();
+            Some(format!("{}m{}s", secs / 60, secs % 60))
+        }
+        _ => {
+            let secs = duration.as_secs();
+            Some(format!("{}h{}m", secs / 3600, (secs % 3600) / 60))
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
-    let git_info = GitInfo::gather(&cwd);
+    let git = GitContext::discover(&cwd);
 
-    let prompt = Prompt::new()
-        .add_if(PathInfo::new(cwd, git_info.root.clone()))
-        .add_if(git_info)
-        .add_if(EnvIndicator::new("IN_NIX_SHELL", "nix"));
+    let mut prompt = Prompt::new(PromptConfig::from_env(Style::new().fg(Color::Yellow)));
 
-    print!("{}", prompt.build());
+    prompt.push(
+        format_path(&cwd, git.as_ref()),
+        Style::new().fg(Color::Cyan).bold(),
+    );
+
+    prompt.push_if(git.as_ref().map(format_git), Style::new().fg(Color::Purple));
+
+    prompt.push_if(
+        std::env::var("IN_NIX_SHELL")
+            .ok()
+            .map(|_| "nix".to_string()),
+        Style::new().fg(Color::LightBlue),
+    );
+
+    prompt.push_if(
+        std::env::var("DIRENV_FILE")
+            .ok()
+            .map(|_| "direnv".to_string()),
+        Style::new().fg(Color::LightBlue),
+    );
+
+    prompt.push_if(
+        std::env::var("CMD_DURATION_MS")
+            .ok()
+            .and_then(|ms| ms.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .and_then(format_duration),
+        Style::new().fg(Color::Red),
+    );
+
+    prompt.push_if(
+        std::env::var("LAST_EXIT_CODE")
+            .ok()
+            .filter(|code| code != "0"),
+        Style::new().fg(Color::Red).bold(),
+    );
+
+    prompt.print();
 
     Ok(())
 }
