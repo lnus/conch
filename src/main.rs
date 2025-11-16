@@ -170,17 +170,18 @@ fn format_git(git: &GitContext) -> String {
     result
 }
 
-fn format_duration(duration: Duration) -> String {
+fn format_duration(duration: Duration) -> Option<String> {
     match duration.as_millis() {
-        0..1000 => format!("{}ms", duration.as_millis()),
-        1000..60_000 => format!("{:.1}s", duration.as_secs_f64()),
+        0..100 => None,
+        100..1000 => Some(format!("{}ms", duration.as_millis())),
+        1000..60_000 => Some(format!("{:.1}s", duration.as_secs_f64())),
         60_000..3_600_000 => {
             let secs = duration.as_secs();
-            format!("{}m{}s", secs / 60, secs % 60)
+            Some(format!("{}m{}s", secs / 60, secs % 60))
         }
         _ => {
             let secs = duration.as_secs();
-            format!("{}h{}m", secs / 3600, (secs % 3600) / 60)
+            Some(format!("{}h{}m", secs / 3600, (secs % 3600) / 60))
         }
     }
 }
@@ -217,7 +218,7 @@ fn main() -> Result<()> {
             .ok()
             .and_then(|ms| ms.parse::<u64>().ok())
             .map(Duration::from_millis)
-            .map(format_duration),
+            .and_then(format_duration),
         Style::new().fg(Color::Red),
     );
 
@@ -225,7 +226,7 @@ fn main() -> Result<()> {
         std::env::var("LAST_EXIT_CODE")
             .ok()
             .filter(|code| code != "0"),
-        Style::new().fg(Color::Red),
+        Style::new().fg(Color::Red).bold(),
     );
 
     prompt.print();
