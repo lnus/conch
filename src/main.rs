@@ -10,14 +10,52 @@ struct Segment {
     style: Style,
 }
 
+struct PromptConfig {
+    separator: String,
+    prefix: Option<String>,
+    suffix: Option<String>,
+    style: Style,
+}
+
+impl PromptConfig {
+    fn from_env(style: Style) -> Self {
+        let plain = std::env::var("CONCH_PLAIN")
+            .map(|v| v == "1" || v == "true")
+            .unwrap_or(false);
+
+        let multiline = std::env::var("CONCH_MULTILINE")
+            .map(|v| v != "0" && v != "false")
+            .unwrap_or(true);
+
+        let (separator, prefix, suffix) = match (plain, multiline) {
+            (true, _) => (" ".to_string(), None, None),
+            (false, true) => (
+                " ∵ ".to_string(),
+                Some("┏━ ".to_string()),
+                Some("\n┃".to_string()),
+            ),
+            (false, false) => (" ∵ ".to_string(), None, None),
+        };
+
+        Self {
+            separator,
+            prefix,
+            suffix,
+            style,
+        }
+    }
+}
+
 struct Prompt {
     segments: Vec<Segment>,
+    config: PromptConfig,
 }
 
 impl Prompt {
-    fn new() -> Self {
+    fn new(config: PromptConfig) -> Self {
         Self {
             segments: Vec::new(),
+            config,
         }
     }
 
@@ -35,11 +73,20 @@ impl Prompt {
     }
 
     fn print(&self) {
+        // TODO: this painting logic is a bit ugly
+        if let Some(prefix) = &self.config.prefix {
+            print!("{}", self.config.style.paint(prefix));
+        }
+
         for (i, seg) in self.segments.iter().enumerate() {
             if i > 0 {
-                print!(" ");
+                print!("{}", self.config.style.paint(&self.config.separator));
             }
             print!("{}", seg.style.paint(&seg.text));
+        }
+
+        if let Some(suffix) = &self.config.suffix {
+            print!("{}", self.config.style.paint(suffix));
         }
     }
 }
@@ -115,12 +162,12 @@ fn format_path(cwd: &Path, git: Option<&GitContext>) -> String {
     .unwrap_or_else(|| cwd.display().to_string())
 }
 
-fn format_git(git: &GitContext) -> Option<String> {
+fn format_git(git: &GitContext) -> String {
     let mut result = git.branch.clone();
     if git.dirty {
         result.push('*');
     }
-    Some(result)
+    result
 }
 
 fn format_duration(duration: Duration) -> String {
@@ -142,37 +189,27 @@ fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let git = GitContext::discover(&cwd);
 
-    let mut prompt = Prompt::new();
+    let mut prompt = Prompt::new(PromptConfig::from_env(Style::new().fg(Color::Yellow)));
 
     prompt.push(
         format_path(&cwd, git.as_ref()),
         Style::new().fg(Color::Cyan).bold(),
     );
 
-    prompt.push_if(
-        git.as_ref().and_then(format_git),
-        Style::new().fg(Color::Purple),
-    );
+    prompt.push_if(git.as_ref().map(format_git), Style::new().fg(Color::Purple));
 
     prompt.push_if(
         std::env::var("IN_NIX_SHELL")
             .ok()
             .map(|_| "nix".to_string()),
-        Style::new().fg(Color::Yellow),
+        Style::new().fg(Color::LightBlue),
     );
 
     prompt.push_if(
         std::env::var("DIRENV_FILE")
             .ok()
             .map(|_| "direnv".to_string()),
-        Style::new().fg(Color::Yellow),
-    );
-
-    prompt.push_if(
-        std::env::var("LAST_EXIT_CODE")
-            .ok()
-            .filter(|code| code != "0"),
-        Style::new().fg(Color::Red),
+        Style::new().fg(Color::LightBlue),
     );
 
     prompt.push_if(
@@ -181,6 +218,13 @@ fn main() -> Result<()> {
             .and_then(|ms| ms.parse::<u64>().ok())
             .map(Duration::from_millis)
             .map(format_duration),
+        Style::new().fg(Color::Red),
+    );
+
+    prompt.push_if(
+        std::env::var("LAST_EXIT_CODE")
+            .ok()
+            .filter(|code| code != "0"),
         Style::new().fg(Color::Red),
     );
 
