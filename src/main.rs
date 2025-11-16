@@ -216,6 +216,7 @@ fn main() -> Result<()> {
     prompt.push_if(
         std::env::var("CMD_DURATION_MS")
             .ok()
+            .filter(|ms| ms != "0823") // https://github.com/nushell/nushell/discussions/6402 okay????
             .and_then(|ms| ms.parse::<u64>().ok())
             .map(Duration::from_millis)
             .and_then(format_duration),
