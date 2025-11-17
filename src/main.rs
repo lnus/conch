@@ -10,53 +10,43 @@ struct Segment {
     style: Style,
 }
 
-struct PromptConfig {
-    separator: String,
+struct Prompt {
+    segments: Vec<Segment>,
+    separator: Option<String>,
     prefix: Option<String>,
     suffix: Option<String>,
     style: Style,
 }
 
-impl PromptConfig {
-    fn from_env(style: Style) -> Self {
-        let plain = std::env::var("CONCH_PLAIN")
-            .map(|v| v == "1" || v == "true")
-            .unwrap_or(false);
-
-        let multiline = std::env::var("CONCH_MULTILINE")
-            .map(|v| v != "0" && v != "false")
-            .unwrap_or(true);
-
-        let (separator, prefix, suffix) = match (plain, multiline) {
-            (true, _) => (" ".to_string(), None, None),
-            (false, true) => (
-                " ∵ ".to_string(),
-                Some("┏━ ".to_string()),
-                Some("\n┃".to_string()),
-            ),
-            (false, false) => (" ∵ ".to_string(), None, None),
-        };
-
-        Self {
-            separator,
-            prefix,
-            suffix,
-            style,
-        }
-    }
-}
-
-struct Prompt {
-    segments: Vec<Segment>,
-    config: PromptConfig,
-}
-
 impl Prompt {
-    fn new(config: PromptConfig) -> Self {
+    fn new() -> Self {
         Self {
             segments: Vec::new(),
-            config,
+            separator: None,
+            prefix: None,
+            suffix: None,
+            style: Style::default(),
         }
+    }
+
+    fn with_separator(mut self, separator: impl Into<String>) -> Self {
+        self.separator = Some(separator.into());
+        self
+    }
+
+    fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
+    }
+
+    fn with_suffix(mut self, suffix: impl Into<String>) -> Self {
+        self.suffix = Some(suffix.into());
+        self
+    }
+
+    fn with_style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
     }
 
     fn push(&mut self, text: impl Into<String>, style: Style) {
@@ -73,20 +63,21 @@ impl Prompt {
     }
 
     fn print(&self) {
-        // TODO: this painting logic is a bit ugly
-        if let Some(prefix) = &self.config.prefix {
-            print!("{}", self.config.style.paint(prefix));
+        if let Some(prefix) = &self.prefix {
+            print!("{}", self.style.paint(prefix));
         }
 
-        for (i, seg) in self.segments.iter().enumerate() {
+        let separator = self.separator.as_deref().unwrap_or(" ");
+
+        self.segments.iter().enumerate().for_each(|(i, seg)| {
             if i > 0 {
-                print!("{}", self.config.style.paint(&self.config.separator));
+                print!("{}", self.style.paint(separator));
             }
             print!("{}", seg.style.paint(&seg.text));
-        }
+        });
 
-        if let Some(suffix) = &self.config.suffix {
-            print!("{}", self.config.style.paint(suffix));
+        if let Some(suffix) = &self.suffix {
+            print!("{}", self.style.paint(suffix));
         }
     }
 }
@@ -190,7 +181,23 @@ fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let git = GitContext::discover(&cwd);
 
-    let mut prompt = Prompt::new(PromptConfig::from_env(Style::new().fg(Color::Yellow)));
+    let plain = std::env::var("CONCH_PLAIN")
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false);
+
+    let multiline = std::env::var("CONCH_MULTILINE")
+        .map(|v| v != "0" && v != "false")
+        .unwrap_or(true);
+
+    let mut prompt = match (plain, multiline) {
+        (true, _) => Prompt::new(),
+        (false, true) => Prompt::new()
+            .with_separator(" ∵ ")
+            .with_prefix("┏━ ")
+            .with_suffix("\n┃"),
+        (false, false) => Prompt::new().with_separator(" ∵ "),
+    }
+    .with_style(Style::new().fg(Color::Yellow));
 
     prompt.push(
         format_path(&cwd, git.as_ref()),
