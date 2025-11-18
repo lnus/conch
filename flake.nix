@@ -21,6 +21,7 @@
     devShells."x86_64-linux".default = pkgs.mkShell {
       buildInputs = with pkgs; [
         cargo
+        cargo-flamegraph
         rustc
         rustfmt
         clippy
