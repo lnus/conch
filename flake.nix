@@ -32,10 +32,18 @@
     };
   in {
     devShells.${system}.default = pkgs.mkShell {
-      buildInputs = [
-        toolchain
-        pkgs.cargo-flamegraph
-      ];
+      packages =
+        [toolchain]
+        ++ (with pkgs; [
+          bacon
+
+          cargo-nextest
+          cargo-flamegraph
+        ]);
+
+      env = {
+        RUST_BACKTRACE = 1;
+      };
     };
 
     packages.${system}.default = naerskLib.buildPackage {
