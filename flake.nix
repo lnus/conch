@@ -1,7 +1,11 @@
-# TODO: could add fenix. for now, whatever
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     naersk = {
       url = "github:nix-community/naersk";
@@ -12,30 +16,30 @@
   outputs = {
     self,
     nixpkgs,
+    fenix,
     naersk,
   }: let
-    # software is probably cross-platform
-    pkgs = nixpkgs.legacyPackages."x86_64-linux";
-    naerskLib = pkgs.callPackage naersk {};
-  in {
-    devShells."x86_64-linux".default = pkgs.mkShell {
-      buildInputs = with pkgs; [
-        cargo
-        cargo-flamegraph
-        rustc
-        rustfmt
-        clippy
-        rust-analyzer
-      ];
+    system = "x86_64-linux";
+    pkgs = nixpkgs.legacyPackages.${system};
 
-      nativeBuildInputs = [pkgs.pkg-config];
-      env.RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
+    # TODO use minimal toolchain, add other deps in devshell.
+    # TEMP for now, use complete
+    toolchain = fenix.packages.${system}.complete.toolchain;
+
+    naerskLib = pkgs.callPackage naersk {
+      cargo = toolchain;
+      rustc = toolchain;
+    };
+  in {
+    devShells.${system}.default = pkgs.mkShell {
+      buildInputs = [
+        toolchain
+        pkgs.cargo-flamegraph
+      ];
     };
 
-    packages."x86_64-linux".default = naerskLib.buildPackage {
+    packages.${system}.default = naerskLib.buildPackage {
       src = ./.;
-      buildInputs = [];
-      nativeBuildInputs = [pkgs.pkg-config];
     };
   };
 }
