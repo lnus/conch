@@ -82,6 +82,7 @@ impl Prompt {
     }
 }
 
+#[derive(Debug)]
 struct GitContext {
     branch: String,
     root: PathBuf,
@@ -103,6 +104,60 @@ impl GitContext {
         Some(Self {
             branch,
             root,
+            dirty,
+        })
+    }
+}
+
+#[derive(Debug)]
+struct JujutsuContext {
+    change_id: String,
+    _root: PathBuf,
+    dirty: bool,
+}
+
+impl JujutsuContext {
+    // TODO probably use jj-lib but too lazy now, quick hack
+    fn discover(cwd: &Path) -> Option<Self> {
+        let mut check_path = cwd.to_path_buf();
+        let root = loop {
+            if check_path.join(".jj").exists() {
+                break check_path;
+            }
+            check_path = check_path.parent()?.to_path_buf();
+        };
+
+        let change_id = std::process::Command::new("jj")
+            .args([
+                "log",
+                "--color",
+                "always",
+                "--no-graph",
+                "--limit",
+                "1",
+                "--revisions",
+                "@",
+                "-T",
+                "change_id.shortest(4)",
+            ])
+            .current_dir(&root)
+            .output()
+            .ok()?
+            .stdout;
+        let change_id = String::from_utf8_lossy(&change_id).trim().to_string();
+
+        let status = std::process::Command::new("jj")
+            .args(["status"])
+            .current_dir(&root)
+            .output()
+            .ok()?
+            .stdout;
+
+        let dirty = !String::from_utf8_lossy(&status).contains("no changes");
+
+        Some(Self {
+            change_id: change_id,
+            _root: root,
             dirty,
         })
     }
@@ -153,6 +208,14 @@ fn format_path(cwd: &Path, git: Option<&GitContext>) -> String {
     .unwrap_or_else(|| cwd.display().to_string())
 }
 
+fn format_jj(jj: &JujutsuContext) -> String {
+    let mut result = jj.change_id.clone();
+    if jj.dirty {
+        result.push('*');
+    }
+    result
+}
+
 fn format_git(git: &GitContext) -> String {
     let mut result = git.branch.clone();
     if git.dirty {
@@ -180,6 +243,7 @@ fn format_duration(duration: Duration) -> Option<String> {
 fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let git = GitContext::discover(&cwd);
+    let jj = JujutsuContext::discover(&cwd);
 
     let plain = std::env::var("CONCH_PLAIN")
         .map(|v| v == "1" || v == "true")
@@ -204,6 +268,7 @@ fn main() -> Result<()> {
         Style::new().fg(Color::Cyan).bold(),
     );
 
+    prompt.push_if(jj.as_ref().map(format_jj), Style::new().fg(Color::Purple));
     prompt.push_if(git.as_ref().map(format_git), Style::new().fg(Color::Purple));
 
     prompt.push_if(
