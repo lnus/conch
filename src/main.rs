@@ -112,7 +112,7 @@ impl GitContext {
 #[derive(Debug)]
 struct JujutsuContext {
     change_id: String,
-    _root: PathBuf,
+    root: PathBuf,
     dirty: bool,
 }
 
@@ -157,9 +157,44 @@ impl JujutsuContext {
 
         Some(Self {
             change_id: change_id,
-            _root: root,
+            root,
             dirty,
         })
+    }
+}
+
+#[derive(Debug)]
+enum RepoContext {
+    Git(GitContext),
+    Jujutsu(JujutsuContext),
+}
+
+impl RepoContext {
+    fn discover(cwd: &Path) -> Option<Self> {
+        JujutsuContext::discover(cwd)
+            .map(Self::Jujutsu)
+            .or_else(|| GitContext::discover(cwd).map(Self::Git))
+    }
+
+    fn root(&self) -> &Path {
+        match self {
+            Self::Git(ctx) => &ctx.root,
+            Self::Jujutsu(ctx) => &ctx.root,
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        match self {
+            Self::Git(ctx) => ctx.dirty,
+            Self::Jujutsu(ctx) => ctx.dirty,
+        }
+    }
+
+    fn reference(&self) -> String {
+        match self {
+            Self::Git(ctx) => ctx.branch.clone(),
+            Self::Jujutsu(ctx) => ctx.change_id.clone(),
+        }
     }
 }
 
@@ -184,10 +219,10 @@ fn abbreviate_path(path: &Path) -> String {
     }
 }
 
-fn format_path(cwd: &Path, git: Option<&GitContext>) -> String {
-    git.and_then(|git| {
-        let relative = cwd.strip_prefix(&git.root).ok()?;
-        let name = git.root.file_name()?.to_str().unwrap_or("?how?");
+fn format_path(cwd: &Path, repo: Option<&RepoContext>) -> String {
+    repo.and_then(|repo| {
+        let relative = cwd.strip_prefix(&repo.root()).ok()?;
+        let name = repo.root().file_name()?.to_str().unwrap_or("?how?");
 
         if relative.as_os_str().is_empty() {
             Some(name.to_string())
@@ -208,17 +243,9 @@ fn format_path(cwd: &Path, git: Option<&GitContext>) -> String {
     .unwrap_or_else(|| cwd.display().to_string())
 }
 
-fn format_jj(jj: &JujutsuContext) -> String {
-    let mut result = jj.change_id.clone();
-    if jj.dirty {
-        result.push('*');
-    }
-    result
-}
-
-fn format_git(git: &GitContext) -> String {
-    let mut result = git.branch.clone();
-    if git.dirty {
+fn format_repo(repo: &RepoContext) -> String {
+    let mut result = repo.reference();
+    if repo.dirty() {
         result.push('*');
     }
     result
@@ -242,8 +269,7 @@ fn format_duration(duration: Duration) -> Option<String> {
 
 fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
-    let git = GitContext::discover(&cwd);
-    let jj = JujutsuContext::discover(&cwd);
+    let repo = RepoContext::discover(&cwd);
 
     let plain = std::env::var("CONCH_PLAIN")
         .map(|v| v == "1" || v == "true")
@@ -264,12 +290,14 @@ fn main() -> Result<()> {
     .with_style(Style::new().fg(Color::Yellow));
 
     prompt.push(
-        format_path(&cwd, git.as_ref()),
+        format_path(&cwd, repo.as_ref()),
         Style::new().fg(Color::Cyan).bold(),
     );
 
-    prompt.push_if(jj.as_ref().map(format_jj), Style::new().fg(Color::Purple));
-    prompt.push_if(git.as_ref().map(format_git), Style::new().fg(Color::Purple));
+    prompt.push_if(
+        repo.as_ref().map(format_repo),
+        Style::new().fg(Color::Purple),
+    );
 
     prompt.push_if(
         std::env::var("IN_NIX_SHELL")
