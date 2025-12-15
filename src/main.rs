@@ -44,7 +44,7 @@ impl Prompt {
         self
     }
 
-    fn with_style(mut self, style: Style) -> Self {
+    const fn with_style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
@@ -53,7 +53,7 @@ impl Prompt {
         self.segments.push(Segment {
             text: text.into(),
             style,
-        })
+        });
     }
 
     fn push_if(&mut self, text: Option<String>, style: Style) {
@@ -156,7 +156,7 @@ impl JujutsuContext {
         let dirty = !String::from_utf8_lossy(&status).contains("no changes");
 
         Some(Self {
-            change_id: change_id,
+            change_id,
             root,
             dirty,
         })
@@ -183,7 +183,7 @@ impl RepoContext {
         }
     }
 
-    fn dirty(&self) -> bool {
+    const fn dirty(&self) -> bool {
         match self {
             Self::Git(ctx) => ctx.dirty,
             Self::Jujutsu(ctx) => ctx.dirty,
@@ -221,7 +221,7 @@ fn abbreviate_path(path: &Path) -> String {
 
 fn format_path(cwd: &Path, repo: Option<&RepoContext>) -> String {
     repo.and_then(|repo| {
-        let relative = cwd.strip_prefix(&repo.root()).ok()?;
+        let relative = cwd.strip_prefix(repo.root()).ok()?;
         let name = repo.root().file_name()?.to_str().unwrap_or("?how?");
 
         if relative.as_os_str().is_empty() {
