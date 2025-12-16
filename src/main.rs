@@ -124,65 +124,14 @@ struct JujutsuContext {
 }
 
 impl JujutsuContext {
-    // TODO probably use jj-lib but too lazy now, quick hack
-    #[allow(dead_code)]
-    fn discover(cwd: &Path) -> Option<Self> {
-        let mut check_path = cwd.to_path_buf();
-        let root = loop {
-            if check_path.join(".jj").exists() {
-                break check_path;
-            }
-            check_path = check_path.parent()?.to_path_buf();
-        };
+    fn discover_jj(cwd: &Path) -> Option<Self> {
+        let workspace_root = cwd.ancestors().find(|path| path.join(".jj").is_dir())?;
 
-        let change_id = std::process::Command::new("jj")
-            .args([
-                "log",
-                "--color",
-                "always",
-                "--no-graph",
-                "--limit",
-                "1",
-                "--revisions",
-                "@",
-                "-T",
-                "change_id.shortest(4)",
-            ])
-            .current_dir(&root)
-            .output()
-            .ok()?
-            .stdout;
-        let change_id = String::from_utf8_lossy(&change_id).trim().to_string();
-
-        let status = std::process::Command::new("jj")
-            .args(["status"])
-            .current_dir(&root)
-            .output()
-            .ok()?
-            .stdout;
-
-        let dirty = !String::from_utf8_lossy(&status).contains("no changes");
-
-        Some(Self {
-            change_id,
-            root,
-            dirty,
-        })
-    }
-
-    #[allow(dead_code)]
-    fn discover_jj_lib(cwd: &Path) -> Option<Self> {
         let user_settings =
             UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
-                .expect("Can't load settings"); // TODO: load actual settings, if necessary
+                .expect("Can't load settings"); // TODO: if necessary, load actual settings
 
-        // TODO: proper error handling. We could just propagate none here v
-        let workspace_root = cwd
-            .ancestors()
-            .find(|path| path.join(".jj").is_dir())
-            .expect("No .jj directory found in parents");
-
-        // TODO: proper error handling. We should do... something here.
+        // TODO: proper error handling.
         let store_factories = StoreFactories::default();
         let wc_factories = default_working_copy_factories();
         let workspace = Workspace::load(
@@ -191,48 +140,50 @@ impl JujutsuContext {
             &store_factories,
             &wc_factories,
         )
-        .expect("Can't load workspace");
+        .expect("Could not load jj workspace");
         dbg!(workspace.workspace_root());
         dbg!(workspace.workspace_name().as_str());
 
         let repo = workspace
             .repo_loader()
             .load_at_head()
-            .expect("Could not load repo head");
+            .expect("Could not load jj repo head");
 
         let workspace_name = workspace.workspace_name();
         let wc_commit_id = repo
             .view()
             .get_wc_commit_id(workspace_name)
-            .expect("Could not get commit ID");
+            .expect("Could not get jj commit ID");
 
         let commit = repo
             .store()
             .get_commit(wc_commit_id)
-            .expect("Could not resolve commit");
+            .expect("Could not resolve jj commit");
 
         dbg!(commit.id().hex());
         dbg!(commit.change_id().reverse_hex());
 
+        // FIXME: prefixes are based on ENTIRE repo, not just current work tree.
         let change_prefix_len = repo
             .shortest_unique_change_id_prefix_len(commit.change_id())
-            .expect("Could not calculate shortest prefix");
+            .expect("Could not calculate shortest prefix for change");
         dbg!(change_prefix_len);
 
         let commit_prefix_len = repo
             .index()
             .shortest_unique_commit_id_prefix_len(commit.id())
-            .expect("Could not calculate shortest prefix");
+            .expect("Could not calculate shortest prefix for commit");
         dbg!(commit_prefix_len);
 
-        // I think this is correct
+        // TODO: This works, but only updates after manual `jj <anything>`
+        // This is arguably okay! But we could rework this and use caching
+        // and then manually trigger a reload on invalidation.
         let discardable = commit
             .is_discardable(&*repo)
             .expect("Could not read is_discarable");
         dbg!(discardable);
 
-        // FIX this is ugly, just gives some output
-        // for now, just ignore.
+        // FIX Ugly placeholder
         Some(Self {
             change_id: commit.change_id().reverse_hex()[..4].to_string(),
             root: workspace_root.to_path_buf(),
@@ -249,7 +200,7 @@ enum RepoContext {
 
 impl RepoContext {
     fn discover(cwd: &Path) -> Option<Self> {
-        JujutsuContext::discover_jj_lib(cwd)
+        JujutsuContext::discover_jj(cwd)
             .map(Self::Jujutsu)
             .or_else(|| GitContext::discover(cwd).map(Self::Git))
     }
