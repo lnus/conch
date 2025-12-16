@@ -9,8 +9,17 @@ dirs = "6.0.0"
 gix = { version = "0.74.1", default-features = false, features = ["max-performance-safe", "status"] }
 nu-ansi-term = "0.50.3"
 
+[profile.release]
+lto = true
+panic = "abort"
+strip = true
+
+[lints.rust]
+unsafe_code = "forbid"
+
 [lints.clippy]
-pedantic = { level = "deny", priority = -1 } # pain
-nursery = { level = "deny", priority = -1 } # fun
-unwrap_used = "deny" # expect can justify invariant
+pedantic = { level = "deny", priority = -1 }
+nursery = { level = "deny", priority = -1 }
+enum_glob_use = "deny"
+unwrap_used = "deny"
 
