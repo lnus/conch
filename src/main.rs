@@ -1,4 +1,5 @@
 use anyhow::Result;
+use jj_lib::id_prefix::IdPrefixIndex;
 use jj_lib::object_id::ObjectId;
 use jj_lib::{
     repo::{Repo, StoreFactories},
@@ -131,7 +132,7 @@ impl JujutsuContext {
             UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
                 .expect("Can't load settings"); // TODO: if necessary, load actual settings
 
-        // TODO: proper error handling.
+        // TODO: Proper error handling
         let store_factories = StoreFactories::default();
         let wc_factories = default_working_copy_factories();
         let workspace = Workspace::load(
@@ -164,14 +165,15 @@ impl JujutsuContext {
         dbg!(commit.change_id().reverse_hex());
 
         // FIXME: prefixes are based on ENTIRE repo, not just current work tree.
-        let change_prefix_len = repo
-            .shortest_unique_change_id_prefix_len(commit.change_id())
+        let id_idx = IdPrefixIndex::empty();
+
+        let change_prefix_len = id_idx
+            .shortest_change_prefix_len(repo.as_ref(), commit.change_id())
             .expect("Could not calculate shortest prefix for change");
         dbg!(change_prefix_len);
 
-        let commit_prefix_len = repo
-            .index()
-            .shortest_unique_commit_id_prefix_len(commit.id())
+        let commit_prefix_len = id_idx
+            .shortest_commit_prefix_len(repo.as_ref(), commit.id())
             .expect("Could not calculate shortest prefix for commit");
         dbg!(commit_prefix_len);
 
