@@ -117,9 +117,16 @@ impl GitContext {
     }
 }
 
+#[derive(Debug, Clone)]
+struct CommitInfo {
+    hex: String,
+    prefix_len: usize,
+}
+
 #[derive(Debug)]
 struct JujutsuContext {
-    change_id: String,
+    commit_info: CommitInfo,
+    change_info: CommitInfo,
     root: PathBuf,
     dirty: bool,
 }
@@ -142,8 +149,6 @@ impl JujutsuContext {
             &wc_factories,
         )
         .expect("Could not load jj workspace");
-        dbg!(workspace.workspace_root());
-        dbg!(workspace.workspace_name().as_str());
 
         let repo = workspace
             .repo_loader()
@@ -161,21 +166,28 @@ impl JujutsuContext {
             .get_commit(wc_commit_id)
             .expect("Could not resolve jj commit");
 
-        dbg!(commit.id().hex());
-        dbg!(commit.change_id().reverse_hex());
-
-        // FIXME: prefixes are based on ENTIRE repo, not just current work tree.
+        // FIXME: prefixes are based on ENTIRE repo, not just "current" work tree.
+        // I have concluded that this is super annoying to fix,
+        // so I'm not going to do that right now.
         let id_idx = IdPrefixIndex::empty();
 
         let change_prefix_len = id_idx
             .shortest_change_prefix_len(repo.as_ref(), commit.change_id())
             .expect("Could not calculate shortest prefix for change");
-        dbg!(change_prefix_len);
+
+        let change_info = CommitInfo {
+            hex: commit.change_id().reverse_hex(),
+            prefix_len: change_prefix_len,
+        };
 
         let commit_prefix_len = id_idx
             .shortest_commit_prefix_len(repo.as_ref(), commit.id())
             .expect("Could not calculate shortest prefix for commit");
-        dbg!(commit_prefix_len);
+
+        let commit_info = CommitInfo {
+            hex: commit.id().hex(),
+            prefix_len: commit_prefix_len,
+        };
 
         // TODO: This works, but only updates after manual `jj <anything>`
         // This is arguably okay! But we could rework this and use caching
@@ -183,11 +195,10 @@ impl JujutsuContext {
         let discardable = commit
             .is_discardable(&*repo)
             .expect("Could not read is_discarable");
-        dbg!(discardable);
 
-        // FIX Ugly placeholder
         Some(Self {
-            change_id: commit.change_id().reverse_hex()[..4].to_string(),
+            commit_info,
+            change_info,
             root: workspace_root.to_path_buf(),
             dirty: !discardable,
         })
@@ -224,7 +235,46 @@ impl RepoContext {
     fn reference(&self) -> String {
         match self {
             Self::Git(ctx) => ctx.branch.clone(),
-            Self::Jujutsu(ctx) => ctx.change_id.clone(),
+            Self::Jujutsu(ctx) => {
+                // THIS IS TERRIBLE
+                // DON'T WORRY ABOUT IT
+                const MAX_LEN: usize = 8;
+
+                let ch_info = ctx.change_info.clone();
+                let ch_prefix = ch_info.hex[..ch_info.prefix_len].to_string();
+                let ch_suffix = ch_info.hex[ch_info.prefix_len..MAX_LEN].to_string();
+
+                let pre_str_ch = Style::new()
+                    .fg(Color::Yellow)
+                    .bold()
+                    .paint(ch_prefix)
+                    .to_string();
+
+                let suf_str_ch = Style::new()
+                    .fg(Color::DarkGray)
+                    .bold()
+                    .paint(ch_suffix)
+                    .to_string();
+
+                // Commit info is... eh?
+                let co_info = ctx.commit_info.clone();
+                let co_prefix = co_info.hex[..co_info.prefix_len].to_string();
+                let co_suffix = co_info.hex[co_info.prefix_len..MAX_LEN].to_string();
+
+                let pre_str_co = Style::new()
+                    .fg(Color::Cyan)
+                    .bold()
+                    .paint(co_prefix)
+                    .to_string();
+
+                let suf_str_co = Style::new()
+                    .fg(Color::DarkGray)
+                    .bold()
+                    .paint(co_suffix)
+                    .to_string();
+
+                pre_str_ch + suf_str_ch.as_str() + " " + pre_str_co.as_str() + suf_str_co.as_str()
+            }
         }
     }
 }
