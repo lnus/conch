@@ -6,7 +6,8 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.100"
 dirs = "6.0.0"
-gix = { version = "0.74.1", default-features = false, features = ["max-performance-safe", "status"] }
+gix = { version = "0.75.0", default-features = false, features = ["max-performance-safe", "status"] }
+jj-lib = "0.36.0"
 nu-ansi-term = "0.50.3"
 
 [profile.release]

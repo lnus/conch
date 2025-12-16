@@ -1,6 +1,13 @@
 use anyhow::Result;
+use jj_lib::object_id::ObjectId;
+use jj_lib::{
+    repo::{Repo, StoreFactories},
+    settings::UserSettings,
+    workspace::{Workspace, default_working_copy_factories},
+};
 use nu_ansi_term::{Color, Style};
 use std::{
+    fmt::Debug,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -118,6 +125,7 @@ struct JujutsuContext {
 
 impl JujutsuContext {
     // TODO probably use jj-lib but too lazy now, quick hack
+    #[allow(dead_code)]
     fn discover(cwd: &Path) -> Option<Self> {
         let mut check_path = cwd.to_path_buf();
         let root = loop {
@@ -161,6 +169,76 @@ impl JujutsuContext {
             dirty,
         })
     }
+
+    #[allow(dead_code)]
+    fn discover_jj_lib(cwd: &Path) -> Option<Self> {
+        let user_settings =
+            UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
+                .expect("Can't load settings"); // TODO: load actual settings, if necessary
+
+        // TODO: proper error handling. We could just propagate none here v
+        let workspace_root = cwd
+            .ancestors()
+            .find(|path| path.join(".jj").is_dir())
+            .expect("No .jj directory found in parents");
+
+        // TODO: proper error handling. We should do... something here.
+        let store_factories = StoreFactories::default();
+        let wc_factories = default_working_copy_factories();
+        let workspace = Workspace::load(
+            &user_settings,
+            workspace_root,
+            &store_factories,
+            &wc_factories,
+        )
+        .expect("Can't load workspace");
+        dbg!(workspace.workspace_root());
+        dbg!(workspace.workspace_name().as_str());
+
+        let repo = workspace
+            .repo_loader()
+            .load_at_head()
+            .expect("Could not load repo head");
+
+        let workspace_name = workspace.workspace_name();
+        let wc_commit_id = repo
+            .view()
+            .get_wc_commit_id(workspace_name)
+            .expect("Could not get commit ID");
+
+        let commit = repo
+            .store()
+            .get_commit(wc_commit_id)
+            .expect("Could not resolve commit");
+
+        dbg!(commit.id().hex());
+        dbg!(commit.change_id().reverse_hex());
+
+        let change_prefix_len = repo
+            .shortest_unique_change_id_prefix_len(commit.change_id())
+            .expect("Could not calculate shortest prefix");
+        dbg!(change_prefix_len);
+
+        let commit_prefix_len = repo
+            .index()
+            .shortest_unique_commit_id_prefix_len(commit.id())
+            .expect("Could not calculate shortest prefix");
+        dbg!(commit_prefix_len);
+
+        // I think this is correct
+        let discardable = commit
+            .is_discardable(&*repo)
+            .expect("Could not read is_discarable");
+        dbg!(discardable);
+
+        // FIX this is ugly, just gives some output
+        // for now, just ignore.
+        Some(Self {
+            change_id: commit.change_id().reverse_hex()[..4].to_string(),
+            root: workspace_root.to_path_buf(),
+            dirty: !discardable,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -171,7 +249,7 @@ enum RepoContext {
 
 impl RepoContext {
     fn discover(cwd: &Path) -> Option<Self> {
-        JujutsuContext::discover(cwd)
+        JujutsuContext::discover_jj_lib(cwd)
             .map(Self::Jujutsu)
             .or_else(|| GitContext::discover(cwd).map(Self::Git))
     }
