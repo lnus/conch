@@ -1,6 +1,5 @@
 use anyhow::Result;
 use jj_lib::id_prefix::IdPrefixIndex;
-use jj_lib::object_id::ObjectId;
 use jj_lib::{
     repo::{Repo, StoreFactories},
     settings::UserSettings,
@@ -18,8 +17,26 @@ struct Segment {
     style: Style,
 }
 
+impl Segment {
+    fn build(&self) -> String {
+        self.style.paint(&self.text).to_string()
+    }
+}
+
+type Part = Vec<Segment>;
+
+trait PartExt {
+    fn build(&self) -> String;
+}
+
+impl PartExt for Part {
+    fn build(&self) -> String {
+        self.iter().map(Segment::build).collect()
+    }
+}
+
 struct Prompt {
-    segments: Vec<Segment>,
+    segments: Part,
     separator: Option<String>,
     prefix: Option<String>,
     suffix: Option<String>,
@@ -29,7 +46,7 @@ struct Prompt {
 impl Prompt {
     fn new() -> Self {
         Self {
-            segments: Vec::new(),
+            segments: Part::default(),
             separator: None,
             prefix: None,
             suffix: None,
@@ -64,9 +81,35 @@ impl Prompt {
         });
     }
 
+    // TODO do something with these or remove
+    // I thought I would need them
+    #[allow(dead_code)]
+    fn push_segment(&mut self, segment: Segment) {
+        self.segments.push(segment);
+    }
+
+    #[allow(dead_code)]
+    fn push_segments(&mut self, segments: Vec<Segment>) {
+        self.segments.extend(segments);
+    }
+
     fn push_if(&mut self, text: Option<String>, style: Style) {
         if let Some(text) = text {
             self.push(text, style);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn push_if_segment(&mut self, segment: Option<Segment>) {
+        if let Some(segment) = segment {
+            self.push_segment(segment);
+        }
+    }
+
+    #[allow(dead_code)]
+    fn push_if_segments(&mut self, segments: Option<Vec<Segment>>) {
+        if let Some(segments) = segments {
+            self.push_segments(segments);
         }
     }
 
@@ -118,15 +161,14 @@ impl GitContext {
 }
 
 #[derive(Debug, Clone)]
-struct CommitInfo {
+struct ChangeInfo {
     hex: String,
     prefix_len: usize,
 }
 
 #[derive(Debug)]
 struct JujutsuContext {
-    commit_info: CommitInfo,
-    change_info: CommitInfo,
+    change_info: ChangeInfo,
     root: PathBuf,
     dirty: bool,
 }
@@ -166,7 +208,8 @@ impl JujutsuContext {
             .get_commit(wc_commit_id)
             .expect("Could not resolve jj commit");
 
-        // FIXME: prefixes are based on ENTIRE repo, not just "current" work tree.
+        // FIXME: prefixes are based on ENTIRE repo index, not just "current" work tree.
+        // ie, revset 'trunk()..@'. Fixing this with only jj-lib sucks afaict.
         // I have concluded that this is super annoying to fix,
         // so I'm not going to do that right now.
         let id_idx = IdPrefixIndex::empty();
@@ -175,29 +218,19 @@ impl JujutsuContext {
             .shortest_change_prefix_len(repo.as_ref(), commit.change_id())
             .expect("Could not calculate shortest prefix for change");
 
-        let change_info = CommitInfo {
+        let change_info = ChangeInfo {
             hex: commit.change_id().reverse_hex(),
             prefix_len: change_prefix_len,
         };
 
-        let commit_prefix_len = id_idx
-            .shortest_commit_prefix_len(repo.as_ref(), commit.id())
-            .expect("Could not calculate shortest prefix for commit");
-
-        let commit_info = CommitInfo {
-            hex: commit.id().hex(),
-            prefix_len: commit_prefix_len,
-        };
-
         // TODO: This works, but only updates after manual `jj <anything>`
         // This is arguably okay! But we could rework this and use caching
-        // and then manually trigger a reload on invalidation.
+        // and then manually trigger a reload on invalidation. (op_id)
         let discardable = commit
             .is_discardable(&*repo)
             .expect("Could not read is_discarable");
 
         Some(Self {
-            commit_info,
             change_info,
             root: workspace_root.to_path_buf(),
             dirty: !discardable,
@@ -211,6 +244,10 @@ enum RepoContext {
     Jujutsu(JujutsuContext),
 }
 
+// TODO:
+// Ideally, should probably define these colors elsewhere.
+// I am going to have to break apart this API soon.
+// For now, get it working, get it running.
 impl RepoContext {
     fn discover(cwd: &Path) -> Option<Self> {
         JujutsuContext::discover_jj(cwd)
@@ -234,46 +271,34 @@ impl RepoContext {
 
     fn reference(&self) -> String {
         match self {
-            Self::Git(ctx) => ctx.branch.clone(),
+            Self::Git(ctx) => Segment {
+                text: ctx.branch.clone(),
+                style: Style::new().fg(Color::Green),
+            }
+            .build(), // FIX Don't set colors here probably
             Self::Jujutsu(ctx) => {
-                // THIS IS TERRIBLE
-                // DON'T WORRY ABOUT IT
+                // FIX This is... okay.
                 const MAX_LEN: usize = 8;
 
-                let ch_info = ctx.change_info.clone();
-                let ch_prefix = ch_info.hex[..ch_info.prefix_len].to_string();
-                let ch_suffix = ch_info.hex[ch_info.prefix_len..MAX_LEN].to_string();
+                let hex = ctx.change_info.hex.clone();
+                let prefix_len = ctx.change_info.prefix_len;
+                let prefix = &hex[..prefix_len];
+                let suffix = &hex[prefix_len..MAX_LEN];
 
-                let pre_str_ch = Style::new()
-                    .fg(Color::Yellow)
-                    .bold()
-                    .paint(ch_prefix)
-                    .to_string();
+                let part: Part = vec![
+                    Segment {
+                        text: prefix.to_string(),
+                        style: Style::new().fg(Color::Yellow).bold(),
+                    },
+                    Segment {
+                        text: suffix.to_string(),
+                        style: Style::new().fg(Color::DarkGray).bold(),
+                    },
+                ]
+                .into_iter()
+                .collect();
 
-                let suf_str_ch = Style::new()
-                    .fg(Color::DarkGray)
-                    .bold()
-                    .paint(ch_suffix)
-                    .to_string();
-
-                // Commit info is... eh?
-                let co_info = ctx.commit_info.clone();
-                let co_prefix = co_info.hex[..co_info.prefix_len].to_string();
-                let co_suffix = co_info.hex[co_info.prefix_len..MAX_LEN].to_string();
-
-                let pre_str_co = Style::new()
-                    .fg(Color::Cyan)
-                    .bold()
-                    .paint(co_prefix)
-                    .to_string();
-
-                let suf_str_co = Style::new()
-                    .fg(Color::DarkGray)
-                    .bold()
-                    .paint(co_suffix)
-                    .to_string();
-
-                pre_str_ch + suf_str_ch.as_str() + " " + pre_str_co.as_str() + suf_str_co.as_str()
+                part.build()
             }
         }
     }
@@ -325,11 +350,11 @@ fn format_path(cwd: &Path, repo: Option<&RepoContext>) -> String {
 }
 
 fn format_repo(repo: &RepoContext) -> String {
-    let mut result = repo.reference();
+    let mut reference = repo.reference();
     if repo.dirty() {
-        result.push('*');
+        reference.push('*');
     }
-    result
+    reference
 }
 
 fn format_duration(duration: Duration) -> Option<String> {
@@ -375,10 +400,9 @@ fn main() -> Result<()> {
         Style::new().fg(Color::Cyan).bold(),
     );
 
-    prompt.push_if(
-        repo.as_ref().map(format_repo),
-        Style::new().fg(Color::Purple),
-    );
+    // Forcing a style here is... not ideal
+    // TODO Consider push_if definition
+    prompt.push_if(repo.as_ref().map(format_repo), Style::default());
 
     prompt.push_if(
         std::env::var("IN_NIX_SHELL")
@@ -394,10 +418,11 @@ fn main() -> Result<()> {
         Style::new().fg(Color::LightBlue),
     );
 
+    // https://github.com/nushell/nushell/discussions/6402 okay????
     prompt.push_if(
         std::env::var("CMD_DURATION_MS")
             .ok()
-            .filter(|ms| ms != "0823") // https://github.com/nushell/nushell/discussions/6402 okay????
+            .filter(|ms| ms != "0823")
             .and_then(|ms| ms.parse::<u64>().ok())
             .map(Duration::from_millis)
             .and_then(format_duration),
