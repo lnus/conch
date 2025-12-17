@@ -1,12 +1,15 @@
 use std::{
     fmt,
-    ops::{Deref, DerefMut},
+    ops::{
+        Deref,
+        DerefMut,
+    },
 };
 
 use nu_ansi_term::Style;
 
 pub struct Segment {
-    pub text: String,
+    pub text:  String,
     pub style: Style,
 }
 
@@ -55,21 +58,21 @@ impl DerefMut for Part {
 
 #[must_use]
 pub struct Prompt {
-    segments: Part,
+    segments:  Part,
     separator: Option<String>,
-    prefix: Option<String>,
-    suffix: Option<String>,
-    style: Style,
+    prefix:    Option<String>,
+    suffix:    Option<String>,
+    style:     Style,
 }
 
 impl Prompt {
     pub fn new() -> Self {
         Self {
-            segments: Part::new(),
+            segments:  Part::new(),
             separator: None,
-            prefix: None,
-            suffix: None,
-            style: Style::default(),
+            prefix:    None,
+            suffix:    None,
+            style:     Style::default(),
         }
     }
 

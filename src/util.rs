@@ -1,4 +1,7 @@
-use std::{path::Path, time::Duration};
+use std::{
+    path::Path,
+    time::Duration,
+};
 
 use crate::repo::RepoContext;
 
@@ -20,7 +23,7 @@ pub fn abbreviate_path(path: &Path) -> String {
                 });
 
             format!("{}/{}", abbreviated, last.as_os_str().to_string_lossy())
-        }
+        },
     }
 }
 
@@ -67,10 +70,10 @@ pub fn format_duration(duration: Duration) -> Option<String> {
         60_000..3_600_000 => {
             let secs = duration.as_secs();
             Some(format!("{}m{}s", secs / 60, secs % 60))
-        }
+        },
         _ => {
             let secs = duration.as_secs();
             Some(format!("{}h{}m", secs / 3600, (secs % 3600) / 60))
-        }
+        },
     }
 }

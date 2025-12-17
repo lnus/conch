@@ -1,20 +1,35 @@
-use std::path::{Path, PathBuf};
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use jj_lib::{
     id_prefix::IdPrefixIndex,
-    repo::{Repo, StoreFactories},
+    repo::{
+        Repo,
+        StoreFactories,
+    },
     settings::UserSettings,
-    workspace::{Workspace, default_working_copy_factories},
+    workspace::{
+        Workspace,
+        default_working_copy_factories,
+    },
 };
-use nu_ansi_term::{Color, Style};
+use nu_ansi_term::{
+    Color,
+    Style,
+};
 
-use crate::prompt::{Part, Segment};
+use crate::prompt::{
+    Part,
+    Segment,
+};
 
 #[derive(Debug)]
 pub struct GitContext {
     branch: String,
-    root: PathBuf,
-    dirty: bool,
+    root:   PathBuf,
+    dirty:  bool,
 }
 
 impl GitContext {
@@ -39,24 +54,26 @@ impl GitContext {
 
 #[derive(Debug, Clone)]
 struct ChangeInfo {
-    hex: String,
+    hex:        String,
     prefix_len: usize,
 }
 
 #[derive(Debug)]
 pub struct JujutsuContext {
     change_info: ChangeInfo,
-    root: PathBuf,
-    dirty: bool,
+    root:        PathBuf,
+    dirty:       bool,
 }
 
 impl JujutsuContext {
     fn discover_jj(cwd: &Path) -> Option<Self> {
-        let workspace_root = cwd.ancestors().find(|path| path.join(".jj").is_dir())?;
+        let workspace_root =
+            cwd.ancestors().find(|path| path.join(".jj").is_dir())?;
 
-        let user_settings =
-            UserSettings::from_config(jj_lib::config::StackedConfig::with_defaults())
-                .expect("Can't load settings"); // TODO: if necessary, load actual settings
+        let user_settings = UserSettings::from_config(
+            jj_lib::config::StackedConfig::with_defaults(),
+        )
+        .expect("Can't load settings"); // TODO: if necessary, load actual settings
 
         // TODO: Proper error handling
         let store_factories = StoreFactories::default();
@@ -85,10 +102,10 @@ impl JujutsuContext {
             .get_commit(wc_commit_id)
             .expect("Could not resolve jj commit");
 
-        // FIXME: prefixes are based on ENTIRE repo index, not just "current" work tree.
-        // ie, revset 'trunk()..@'. Fixing this with only jj-lib sucks afaict.
-        // I have concluded that this is super annoying to fix,
-        // so I'm not going to do that right now.
+        // FIXME: prefixes are based on ENTIRE repo index, not just "current"
+        // work tree. ie, revset 'trunk()..@'. Fixing this with only
+        // jj-lib sucks afaict. I have concluded that this is super
+        // annoying to fix, so I'm not going to do that right now.
         let id_idx = IdPrefixIndex::empty();
 
         let change_prefix_len = id_idx
@@ -96,7 +113,7 @@ impl JujutsuContext {
             .expect("Could not calculate shortest prefix for change");
 
         let change_info = ChangeInfo {
-            hex: commit.change_id().reverse_hex(),
+            hex:        commit.change_id().reverse_hex(),
             prefix_len: change_prefix_len,
         };
 
@@ -151,11 +168,13 @@ impl RepoContext {
     #[must_use]
     pub fn reference(&self) -> String {
         match self {
-            Self::Git(ctx) => Segment {
-                text: ctx.branch.clone(),
-                style: Style::new().fg(Color::Green),
-            }
-            .to_string(), // FIX Don't set colors here probably
+            Self::Git(ctx) => {
+                Segment {
+                    text:  ctx.branch.clone(),
+                    style: Style::new().fg(Color::Green),
+                }
+                .to_string()
+            }, // FIX Don't set colors here probably
             Self::Jujutsu(ctx) => {
                 // FIX This is... okay.
                 const MAX_LEN: usize = 8;
@@ -167,16 +186,16 @@ impl RepoContext {
 
                 Part(vec![
                     Segment {
-                        text: prefix.to_string(),
+                        text:  prefix.to_string(),
                         style: Style::new().fg(Color::Yellow).bold(),
                     },
                     Segment {
-                        text: suffix.to_string(),
+                        text:  suffix.to_string(),
                         style: Style::new().fg(Color::DarkGray).bold(),
                     },
                 ])
                 .to_string()
-            }
+            },
         }
     }
 }

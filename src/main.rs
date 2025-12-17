@@ -1,11 +1,19 @@
+use std::time::Duration;
+
 use anyhow::Result;
 use conch::{
     prompt::Prompt,
     repo::RepoContext,
-    util::{format_duration, format_path, format_repo},
+    util::{
+        format_duration,
+        format_path,
+        format_repo,
+    },
 };
-use nu_ansi_term::{Color, Style};
-use std::time::Duration;
+use nu_ansi_term::{
+    Color,
+    Style,
+};
 
 fn main() -> Result<()> {
     let cwd = std::env::current_dir()?;
@@ -21,10 +29,12 @@ fn main() -> Result<()> {
 
     let mut prompt = match (plain, multiline) {
         (true, _) => Prompt::new(),
-        (false, true) => Prompt::new()
-            .with_separator(" • ")
-            .with_prefix("╭─ ")
-            .with_suffix("\n│"),
+        (false, true) => {
+            Prompt::new()
+                .with_separator(" • ")
+                .with_prefix("╭─ ")
+                .with_suffix("\n│")
+        },
         (false, false) => Prompt::new().with_separator(" ∵ "),
     }
     .with_style(Style::new().fg(Color::Yellow));
