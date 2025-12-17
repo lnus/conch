@@ -1,3 +1,8 @@
+use std::{
+    fmt,
+    ops::{Deref, DerefMut},
+};
+
 use nu_ansi_term::Style;
 
 pub struct Segment {
@@ -5,24 +10,50 @@ pub struct Segment {
     pub style: Style,
 }
 
-impl Segment {
-    pub fn build(&self) -> String {
-        self.style.paint(&self.text).to_string()
+impl fmt::Display for Segment {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.style.paint(&self.text))
     }
 }
 
-pub type Part = Vec<Segment>;
+pub struct Part(pub Vec<Segment>);
 
-pub trait PartExt {
-    fn build(&self) -> String;
-}
-
-impl PartExt for Part {
-    fn build(&self) -> String {
-        self.iter().map(Segment::build).collect()
+impl Part {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self(Vec::new())
     }
 }
 
+impl Default for Part {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl fmt::Display for Part {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for segment in &self.0 {
+            write!(f, "{segment}")?;
+        }
+        Ok(())
+    }
+}
+
+impl Deref for Part {
+    type Target = Vec<Segment>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Part {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+#[must_use]
 pub struct Prompt {
     segments: Part,
     separator: Option<String>,
@@ -34,7 +65,7 @@ pub struct Prompt {
 impl Prompt {
     pub fn new() -> Self {
         Self {
-            segments: Part::default(),
+            segments: Part::new(),
             separator: None,
             prefix: None,
             suffix: None,
@@ -114,5 +145,11 @@ impl Prompt {
         if let Some(suffix) = &self.suffix {
             print!("{}", self.style.paint(suffix));
         }
+    }
+}
+
+impl Default for Prompt {
+    fn default() -> Self {
+        Self::new()
     }
 }

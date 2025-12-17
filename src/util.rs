@@ -3,6 +3,7 @@ use std::{path::Path, time::Duration};
 use crate::repo::RepoContext;
 
 // magnum opus function
+#[must_use]
 pub fn abbreviate_path(path: &Path) -> String {
     match path.components().collect::<Vec<_>>().as_slice() {
         [] | [_] => path.display().to_string(),
@@ -23,6 +24,7 @@ pub fn abbreviate_path(path: &Path) -> String {
     }
 }
 
+#[must_use]
 pub fn format_path(cwd: &Path, repo: Option<&RepoContext>) -> String {
     repo.and_then(|repo| {
         let relative = cwd.strip_prefix(repo.root()).ok()?;
@@ -47,6 +49,7 @@ pub fn format_path(cwd: &Path, repo: Option<&RepoContext>) -> String {
     .unwrap_or_else(|| cwd.display().to_string())
 }
 
+#[must_use]
 pub fn format_repo(repo: &RepoContext) -> String {
     let mut reference = repo.reference();
     if repo.dirty() {
@@ -55,6 +58,7 @@ pub fn format_repo(repo: &RepoContext) -> String {
     reference
 }
 
+#[must_use]
 pub fn format_duration(duration: Duration) -> Option<String> {
     match duration.as_millis() {
         0..100 => None,

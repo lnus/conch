@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::path::{Path, PathBuf};
 
 use jj_lib::{
@@ -10,7 +8,7 @@ use jj_lib::{
 };
 use nu_ansi_term::{Color, Style};
 
-use crate::prompt::{Part, PartExt, Segment};
+use crate::prompt::{Part, Segment};
 
 #[derive(Debug)]
 pub struct GitContext {
@@ -134,6 +132,7 @@ impl RepoContext {
             .or_else(|| GitContext::discover(cwd).map(Self::Git))
     }
 
+    #[must_use]
     pub fn root(&self) -> &Path {
         match self {
             Self::Git(ctx) => &ctx.root,
@@ -141,6 +140,7 @@ impl RepoContext {
         }
     }
 
+    #[must_use]
     pub const fn dirty(&self) -> bool {
         match self {
             Self::Git(ctx) => ctx.dirty,
@@ -148,13 +148,14 @@ impl RepoContext {
         }
     }
 
+    #[must_use]
     pub fn reference(&self) -> String {
         match self {
             Self::Git(ctx) => Segment {
                 text: ctx.branch.clone(),
                 style: Style::new().fg(Color::Green),
             }
-            .build(), // FIX Don't set colors here probably
+            .to_string(), // FIX Don't set colors here probably
             Self::Jujutsu(ctx) => {
                 // FIX This is... okay.
                 const MAX_LEN: usize = 8;
@@ -164,7 +165,7 @@ impl RepoContext {
                 let prefix = &hex[..prefix_len];
                 let suffix = &hex[prefix_len..MAX_LEN];
 
-                let part: Part = vec![
+                Part(vec![
                     Segment {
                         text: prefix.to_string(),
                         style: Style::new().fg(Color::Yellow).bold(),
@@ -173,11 +174,8 @@ impl RepoContext {
                         text: suffix.to_string(),
                         style: Style::new().fg(Color::DarkGray).bold(),
                     },
-                ]
-                .into_iter()
-                .collect();
-
-                part.build()
+                ])
+                .to_string()
             }
         }
     }
