@@ -363,9 +363,9 @@ fn main() -> Result<()> {
     let mut prompt = match (plain, multiline) {
         (true, _) => Prompt::new(),
         (false, true) => Prompt::new()
-            .with_separator(" ∵ ")
-            .with_prefix("┏━ ")
-            .with_suffix("\n┃"),
+            .with_separator(" • ")
+            .with_prefix("╭─ ")
+            .with_suffix("\n│"),
         (false, false) => Prompt::new().with_separator(" ∵ "),
     }
     .with_style(Style::new().fg(Color::Yellow));
