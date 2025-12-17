@@ -55,13 +55,6 @@ fn main() -> Result<()> {
         Style::new().fg(Color::LightBlue),
     );
 
-    prompt.push_if(
-        std::env::var("DIRENV_FILE")
-            .ok()
-            .map(|_| "direnv".to_string()),
-        Style::new().fg(Color::LightBlue),
-    );
-
     // https://github.com/nushell/nushell/discussions/6402 okay????
     prompt.push_if(
         std::env::var("CMD_DURATION_MS")
